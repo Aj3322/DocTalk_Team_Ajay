@@ -1,7 +1,6 @@
 import os
-from fastapi import Body, FastAPI, UploadFile, File, Form, HTTPException
+from flask import Flask, request, jsonify
 from dotenv import load_dotenv
-from pydantic import BaseModel
 import pandas as pd
 import google.generativeai as genai
 from io import BytesIO
@@ -14,9 +13,8 @@ google_api_key = os.getenv("google_api_key")
 genai.configure(api_key=google_api_key)
 model = genai.GenerativeModel('gemini-1.5-pro')
 
-# Initialize the FastAPI app
-app = FastAPI()
-
+# Initialize the Flask app
+app = Flask(__name__)
 
 # Load doctor's data from Excel
 try:
@@ -57,17 +55,19 @@ def get_gemini_response(prompt, image=None):
         return "An error occurred while generating a response."
 
 
-@app.get("/")
-async def home():
-    return {"message": "Welcome To Doc Talk"}
+@app.route("/", methods=["GET"])
+def home():
+    return jsonify({"message": "Welcome To Doc Talk"})
 
 # API route to handle text and image input
-@app.post("/chatbot/")
-async def chatbot(prompt: str=Body() ,image: UploadFile = File(None)):
+@app.route("/chatbot/", methods=["POST"])
+def chatbot():
     try:
+        prompt = request.form.get('prompt')
+        image = request.files.get('image')
         img = None
         if image:
-            image_bytes = await image.read()
+            image_bytes = image.read()
             img = Image.open(BytesIO(image_bytes))
             img.save('upload.png') 
 
@@ -80,22 +80,25 @@ async def chatbot(prompt: str=Body() ,image: UploadFile = File(None)):
             if specialty in response_text.lower():
                 recommended_doctors.append(doc_data[doc_data['Speciality'].str.lower() == specialty])
 
-        return {
+        return jsonify({
             "bot_response": response_text,
             "recommended_doctors": recommended_doctors[:3]  # Limit to top 3 recommendations
-        }
+        })
     except Exception as e:
         print(f"Error in chatbot endpoint: {e}")
-        raise HTTPException(status_code=500, detail="Internal Server Error")
+        return jsonify({"detail": "Internal Server Error"}), 500
 
 # API route to schedule an appointment
-@app.post("/schedule/")
-async def schedule(doctor_name: str = Form(...)):
+@app.route("/schedule/", methods=["POST"])
+def schedule():
     try:
+        doctor_name = request.form.get('doctor_name')
         appointment_message = schedule_appointment(doctor_name)
-        return {"message": appointment_message}
+        return jsonify({"message": appointment_message})
     except Exception as e:
         print(f"Error in schedule endpoint: {e}")
-        raise HTTPException(status_code=500, detail="Internal Server Error")
+        return jsonify({"detail": "Internal Server Error"}), 500
 
 
+if __name__ == "__main__":
+    app.run(debug=True, host="0.0.0.0", port=5000)
